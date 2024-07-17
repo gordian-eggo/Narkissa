@@ -1,20 +1,32 @@
 package com.juuuleees.narkissa
 
+import android.Manifest
+import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
 import androidx.core.content.PackageManagerCompat
+import androidx.core.content.PermissionChecker
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.juuuleees.narkissa.databinding.ActivityMainBinding
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -54,9 +66,94 @@ class MainActivity : AppCompatActivity() {
 //        }
     }
 
-    private fun startCamera() {}
+    private fun bluetoothToArduino() {
+        viewBinding.bluetoothConnectButton.isEnabled = false
+    }
 
-    private fun bluetoothToArduino() {}
+    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+
+        cameraProviderFuture.addListener({
+//            bind camera lifecycle to lifecycle owner
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+//            make the preview
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
+            }
+
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+            try {
+//                unbind use cases before rebinding use cases to the camera
+                cameraProvider.unbindAll()
+                cameraProvider.bindToLifecycle(
+                    this, cameraSelector, preview
+                )
+            } catch (exc: Exception) {
+                Log.e(TAG, "Use case binding failed", exc)
+            }
+        }, ContextCompat.getMainExecutor(this))
+
+
+    }
+
+    private fun captureVideo() {
+        val videoCapture = this.videoCapture ?: return
+
+//        viewBinding.videoCaptureButton.isEnabled = false
+
+        val currentRecording = recording
+        if (currentRecording != null) {
+            currentRecording.stop()
+            recording = null
+            return
+        }
+
+//        create and start new recording
+        val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis())
+
+        val contentValues = ContentValues().apply() {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Narkissa/VideoScans")
+            }
+        }
+
+        val mediaStoreOutputOptions = MediaStoreOutputOptions
+            .Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+            .setContentValues(contentValues)
+            .build()
+        recording = videoCapture.output.prepareRecording(this, mediaStoreOutputOptions)
+            .start(ContextCompat.getMainExecutor(this)) {
+                recordEvent -> when(recordEvent) {
+                    is VideoRecordEvent.Start -> {
+                        viewBinding.videoCaptureButton.apply {
+                            text = getString(R.string.stop_capture)
+                            isEnabled = true
+                        }
+                    }
+                is VideoRecordEvent.Finalize -> {
+                    if (!recordEvent.hasError()) {
+                            val msg = "Video capture succeeded: " +
+                                "${recordEvent.outputResults.outputUri}"
+                            Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show()
+                            Log.d(TAG, msg)
+                        } else {
+                            recording?.close()
+                            recording = null
+                            Log.e(TAG, "Video capture ends with error: " +
+                                "${recordEvent.error}")
+                        }
+                        viewBinding.videoCaptureButton.apply {
+                            text = getString(R.string.video_capture_text)
+                            isEnabled = true
+                        }
+                    }
+                }
+            }
+    }
 
     private fun requestPermissions() {
         activityResultLauncher.launch(REQUIRED_PERMISSIONS)
