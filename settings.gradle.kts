@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Narkissa"
 include(":app")
+include(":OpenCV")
