@@ -1,14 +1,16 @@
 package com.juuuleees.narkissa
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
@@ -24,10 +26,7 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
-import androidx.core.content.PackageManagerCompat
 import androidx.core.content.PermissionChecker
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.juuuleees.narkissa.databinding.ActivityMainBinding
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
@@ -50,8 +49,6 @@ class MainActivity : AppCompatActivity() {
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
 
-
-
 //        request camera permissions
         if (allPermissionsGranted()) {
             startCamera()
@@ -59,8 +56,19 @@ class MainActivity : AppCompatActivity() {
             requestPermissions()
         }
 
+        val bluetoothAvailable = packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)
+        val bluetoothManager: BluetoothManager = getSystemService(BluetoothManager::class.java)
+        val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.getAdapter()
+
+        if (bluetoothAdapter == null) {
+            Toast.makeText(this,"Bluetooth unsupported", Toast.LENGTH_SHORT).show()
+        }
+        if ((bluetoothAvailable == true ) && (bluetoothAdapter?.isEnabled == false)) {
+            val enableBluetoothIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+        }
+
 //        set up listener for start_connection button
-//        viewBinding.bluetoothConnectButton.setOnClickListener { bluetoothToArduino() }
+        viewBinding.bluetoothConnectButton.setOnClickListener { bluetoothToArduino() }
         viewBinding.videoCaptureButton.setOnClickListener { captureVideo() }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
@@ -68,7 +76,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun bluetoothToArduino() {
-//        viewBinding.bluetoothConnectButton.isEnabled = false
+        viewBinding.bluetoothConnectButton.isEnabled = false
+        Log.d(TAG, "Trying to connect to HC-05...")
+        val bluetoothHandler = BluetoothHandler()
+
+//        TODO: object that will handle bluetooth connection _and_ data transfer
     }
 
     private fun startCamera() {
@@ -89,7 +101,7 @@ class MainActivity : AppCompatActivity() {
             val imageAnalyzer = ImageAnalysis.Builder().build()
                 .also {
                     it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
-                        Log.d(TAG, "Average luminosity: $luma")
+//                        Log.d(TAG, "Average luminosity: $luma")
                     })
                 }
 
@@ -111,11 +123,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun captureVideo() {
 
-//        Toast.makeText(this, "captureVideo() started", Toast.LENGTH_SHORT).show()
-//        Log.d(VIDEOCAP, "captureVideo() initiated")
         val videoCapture = videoCapture ?: return
 
-//        Log.d(VIDEOCAP, "button enabled?")
         viewBinding.videoCaptureButton.isEnabled = false
 
         val currentRecording = recording
@@ -124,10 +133,8 @@ class MainActivity : AppCompatActivity() {
             recording = null
             return
         }
-//        Log.d(VIDEOCAP, "Checked for existing recording")
 
 //        create and start new recording
-//        Log.d(VIDEOCAP, "Declaring filenames")
         val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis())
 
         val contentValues = ContentValues().apply {
@@ -142,7 +149,7 @@ class MainActivity : AppCompatActivity() {
             .Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
             .setContentValues(contentValues)
             .build()
-//        Log.d(VIDEOCAP, "Initializing recording")
+
         recording = videoCapture.output.prepareRecording(this, mediaStoreOutputOptions)
             .apply {
                 if (PermissionChecker.checkSelfPermission(this@MainActivity,
@@ -152,14 +159,12 @@ class MainActivity : AppCompatActivity() {
             }.start(ContextCompat.getMainExecutor(this)) { recordEvent ->
                 when(recordEvent) {
                     is VideoRecordEvent.Start -> {
-//                        Toast.makeText(this, "record event start", Toast.LENGTH_SHORT).show()
                         viewBinding.videoCaptureButton.apply {
                             text = getString(R.string.stop_capture)
                             isEnabled = true
                         }
                     }
                     is VideoRecordEvent.Finalize -> {
-//                        Toast.makeText(this, "record event finalize", Toast.LENGTH_SHORT).show()
                         if (!recordEvent.hasError()) {
                                 val msg = "Video capture succeeded: " +
                                     "${recordEvent.outputResults.outputUri}"
@@ -215,7 +220,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "Narkissa"
-        private const val VIDEOCAP = "captureVideo"
         private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
         private val REQUIRED_PERMISSIONS =
             mutableListOf(
