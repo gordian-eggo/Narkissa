@@ -12,6 +12,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.MediaStoreOutputOptions
@@ -27,6 +29,7 @@ import androidx.core.content.PermissionChecker
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.juuuleees.narkissa.databinding.ActivityMainBinding
+import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -83,13 +86,20 @@ class MainActivity : AppCompatActivity() {
             val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
             videoCapture = VideoCapture.withOutput(recorder)
 
+            val imageAnalyzer = ImageAnalysis.Builder().build()
+                .also {
+                    it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
+                        Log.d(TAG, "Average luminosity: $luma")
+                    })
+                }
+
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
             try {
 //                unbind use cases before rebinding use cases to the camera
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, videoCapture
+                    this, cameraSelector, preview, videoCapture, imageAnalyzer
                 )
             } catch (exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
@@ -215,5 +225,25 @@ class MainActivity : AppCompatActivity() {
                     add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 }
             }.toTypedArray()
+    }
+
+    private class LuminosityAnalyzer(private val listener: LumaListener) : ImageAnalysis.Analyzer {
+        private fun ByteBuffer.toByteArray(): ByteArray {
+            rewind()  // rewinds the buffer to zero
+            val data = ByteArray(remaining())
+            get(data) // copy buffer into a byte array
+            return data
+        }
+
+        override fun analyze(image: ImageProxy) {
+            val buffer = image.planes[0].buffer
+            val data = buffer.toByteArray()
+            val pixels = data.map { it.toInt() and 0xFF }
+            val luma = pixels.average()
+
+            listener(luma)
+
+            image.close()
+        }
     }
 }
