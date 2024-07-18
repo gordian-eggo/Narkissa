@@ -2,9 +2,13 @@ package com.juuuleees.narkissa
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -41,6 +45,7 @@ class MainActivity : AppCompatActivity() {
 
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
+    private lateinit var bluetoothAdapter: BluetoothAdapter
 
     private lateinit var cameraExecutor: ExecutorService
 
@@ -58,13 +63,12 @@ class MainActivity : AppCompatActivity() {
 
         val bluetoothAvailable = packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)
         val bluetoothManager: BluetoothManager = getSystemService(BluetoothManager::class.java)
-        val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.getAdapter()
+        bluetoothAdapter = bluetoothManager.getAdapter()
 
-        if (bluetoothAdapter == null) {
-            Toast.makeText(this,"Bluetooth unsupported", Toast.LENGTH_SHORT).show()
-        }
-        if ((bluetoothAvailable == true ) && (bluetoothAdapter?.isEnabled == false)) {
-            val enableBluetoothIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+        if ((bluetoothAvailable == true ) && (bluetoothAdapter.isEnabled == false)) {
+//            val enableBluetoothIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+            val filter = IntentFilter(BluetoothDevice.ACTION_FOUND)
+            registerReceiver(receiver, filter)
         }
 
 //        set up listener for start_connection button
@@ -78,9 +82,8 @@ class MainActivity : AppCompatActivity() {
     private fun bluetoothToArduino() {
         viewBinding.bluetoothConnectButton.isEnabled = false
         Log.d(TAG, "Trying to connect to HC-05...")
-        val bluetoothHandler = BluetoothHandler()
+        val bluetoothHandler = BluetoothDataHandler(bluetoothAdapter)
 
-//        TODO: object that will handle bluetooth connection _and_ data transfer
     }
 
     private fun startCamera() {
@@ -151,12 +154,7 @@ class MainActivity : AppCompatActivity() {
             .build()
 
         recording = videoCapture.output.prepareRecording(this, mediaStoreOutputOptions)
-            .apply {
-                if (PermissionChecker.checkSelfPermission(this@MainActivity,
-                        Manifest.permission.RECORD_AUDIO) == PermissionChecker.PERMISSION_GRANTED) {
-                    withAudioEnabled()
-                }
-            }.start(ContextCompat.getMainExecutor(this)) { recordEvent ->
+            .start(ContextCompat.getMainExecutor(this)) { recordEvent ->
                 when(recordEvent) {
                     is VideoRecordEvent.Start -> {
                         viewBinding.videoCaptureButton.apply {
@@ -216,21 +214,43 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
+        unregisterReceiver(receiver)
     }
 
     companion object {
         private const val TAG = "Narkissa"
+        private const val SECURITY_EXCEPTION = "SecurityException"
         private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
         private val REQUIRED_PERMISSIONS =
             mutableListOf(
-                Manifest.permission.CAMERA
+                Manifest.permission.CAMERA,
+                Manifest.permission.BLUETOOTH,
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_ADMIN,
+                Manifest.permission.BLUETOOTH_CONNECT
             ).apply {
                 if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
                     add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 }
             }.toTypedArray()
     }
-
+// 18-7-2024: trying to set up bluetooth receiver, type mismatches occuring
+    private val receiver = object: BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val action: String = intent.action
+            when(action) {
+                BluetoothDevice.ACTION_FOUND -> {
+                    try {
+                        val device: BluetoothDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                        val deviceName = device.name
+                        val deviceMACAddress = device.address
+                    } catch (se: SecurityException) {
+                        Log.d(SECURITY_EXCEPTION, "${se}")
+                    }
+                }
+            }
+        }
+    }
     private class LuminosityAnalyzer(private val listener: LumaListener) : ImageAnalysis.Analyzer {
         private fun ByteBuffer.toByteArray(): ByteArray {
             rewind()  // rewinds the buffer to zero
