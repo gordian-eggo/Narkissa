@@ -1,9 +1,12 @@
 package com.juuuleees.narkissa
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothServerSocket
+import android.bluetooth.BluetoothSocket
 import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
@@ -29,12 +32,14 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.PermissionChecker
 import com.juuuleees.narkissa.databinding.ActivityMainBinding
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -46,8 +51,9 @@ class MainActivity : AppCompatActivity() {
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
     private lateinit var bluetoothAdapter: BluetoothAdapter
-
+//    private lateinit var btServerSocket: BluetoothServerSocket
     private lateinit var cameraExecutor: ExecutorService
+    private var permissionsGranted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +62,7 @@ class MainActivity : AppCompatActivity() {
 
 //        request camera permissions
         if (allPermissionsGranted()) {
+            permissionsGranted = true
             startCamera()
         } else {
             requestPermissions()
@@ -63,10 +70,15 @@ class MainActivity : AppCompatActivity() {
 
         val bluetoothAvailable = packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)
         val bluetoothManager: BluetoothManager = getSystemService(BluetoothManager::class.java)
+        val bluetoothRequestCode = 1
+        val discoverableIntent: Intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
+            .apply {
+                putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120)
+            }
         bluetoothAdapter = bluetoothManager.getAdapter()
 
         if ((bluetoothAvailable == true ) && (bluetoothAdapter.isEnabled == false)) {
-//            val enableBluetoothIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+            val enableBluetoothIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
             val filter = IntentFilter(BluetoothDevice.ACTION_FOUND)
             registerReceiver(receiver, filter)
         }
@@ -77,12 +89,45 @@ class MainActivity : AppCompatActivity() {
 
         cameraExecutor = Executors.newSingleThreadExecutor()
 
+        startActivityForResult(discoverableIntent, bluetoothRequestCode)
     }
 
     private fun bluetoothToArduino() {
         viewBinding.bluetoothConnectButton.isEnabled = false
         Log.d(TAG, "Trying to connect to HC-05...")
-        val bluetoothHandler = BluetoothDataHandler(bluetoothAdapter)
+
+        class AcceptThread: Thread() {
+
+            // fixed permission error 5-11-2024
+            @SuppressLint("MissingPermission")
+            val btServerSocket: BluetoothServerSocket? = bluetoothAdapter?.
+            listenUsingInsecureRfcommWithServiceRecord(NAME, NB_UUID)
+
+            override fun run() {
+                var shouldLoop = true
+                while (shouldLoop) {
+                    val socket: BluetoothSocket? = try {
+                        btServerSocket?.accept()
+                    } catch (ioe: IOException) {
+                        Log.e(TAG, "Socket accept() method failed")
+                        shouldLoop = false
+                        null
+                    }
+                    socket?.also {
+                        btServerSocket?.close()
+                        shouldLoop = false
+                    }
+                }
+            }
+
+            fun cancel() {
+                try {
+                    btServerSocket?.close()
+                } catch (ioe: IOException) {
+                    Log.e(TAG, "Couldn't close socket connection", ioe)
+                }
+            }
+        }
 
     }
 
@@ -182,6 +227,25 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
+    // 18-7-2024: trying to set up bluetooth receiver, type mismatches occurring
+    private val receiver = object: BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val action: String? = intent.action
+            when(action) {
+                BluetoothDevice.ACTION_FOUND -> {
+                    try {
+                        val device: BluetoothDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)!!
+                        val deviceName = device.name
+                        val deviceMACAddress = device.address
+                        Log.d(TAG, "Found device ${deviceMACAddress}")
+                    } catch (se: SecurityException) {
+                        Log.d(SECURITY_EXCEPTION, "${se}")
+                    }
+                }
+            }
+        }
+    }
+
     private fun requestPermissions() {
         activityResultLauncher.launch(REQUIRED_PERMISSIONS)
     }
@@ -219,6 +283,9 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "Narkissa"
+        private const val NAME = "Narkissa_Body"
+        private val NB_UUID = UUID.fromString("dbd156b1-4c95-4d3d-8e3a-10e180b460e4")
+        // NB_UUID generated by uuidgenerator.net/version4
         private const val SECURITY_EXCEPTION = "SecurityException"
         private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
         private val REQUIRED_PERMISSIONS =
@@ -234,23 +301,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }.toTypedArray()
     }
-// 18-7-2024: trying to set up bluetooth receiver, type mismatches occuring
-    private val receiver = object: BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val action: String = intent.action
-            when(action) {
-                BluetoothDevice.ACTION_FOUND -> {
-                    try {
-                        val device: BluetoothDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                        val deviceName = device.name
-                        val deviceMACAddress = device.address
-                    } catch (se: SecurityException) {
-                        Log.d(SECURITY_EXCEPTION, "${se}")
-                    }
-                }
-            }
-        }
-    }
+
     private class LuminosityAnalyzer(private val listener: LumaListener) : ImageAnalysis.Analyzer {
         private fun ByteBuffer.toByteArray(): ByteArray {
             rewind()  // rewinds the buffer to zero
