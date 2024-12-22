@@ -1,11 +1,9 @@
 package com.juuuleees.narkissa
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.content.BroadcastReceiver
 import android.content.ContentValues
@@ -32,7 +30,6 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.juuuleees.narkissa.databinding.ActivityMainBinding
 import java.io.IOException
@@ -51,7 +48,6 @@ class MainActivity : AppCompatActivity() {
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
     private lateinit var bluetoothAdapter: BluetoothAdapter
-//    private lateinit var btServerSocket: BluetoothServerSocket
     private lateinit var cameraExecutor: ExecutorService
     private var permissionsGranted = false
 
@@ -77,10 +73,11 @@ class MainActivity : AppCompatActivity() {
             }
         bluetoothAdapter = bluetoothManager.getAdapter()
 
-        if ((bluetoothAvailable == true ) && (bluetoothAdapter.isEnabled == false)) {
-            val enableBluetoothIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+        if (bluetoothAvailable == true ) {
+//            val enableBluetoothIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
             val filter = IntentFilter(BluetoothDevice.ACTION_FOUND)
             registerReceiver(receiver, filter)
+            Log.d(TAG, "Found devices.")
         }
 
 //        set up listener for start_connection button
@@ -92,43 +89,58 @@ class MainActivity : AppCompatActivity() {
         startActivityForResult(discoverableIntent, bluetoothRequestCode)
     }
 
+    @Override
+    @SuppressWarnings("MissingPermission")
     private fun bluetoothToArduino() {
         viewBinding.bluetoothConnectButton.isEnabled = false
         Log.d(TAG, "Trying to connect to HC-05...")
 
-        class AcceptThread: Thread() {
-
-            // fixed permission error 5-11-2024
-            @SuppressLint("MissingPermission")
-            val btServerSocket: BluetoothServerSocket? = bluetoothAdapter?.
-            listenUsingInsecureRfcommWithServiceRecord(NAME, NB_UUID)
-
-            override fun run() {
-                var shouldLoop = true
-                while (shouldLoop) {
-                    val socket: BluetoothSocket? = try {
-                        btServerSocket?.accept()
-                    } catch (ioe: IOException) {
-                        Log.e(TAG, "Socket accept() method failed")
-                        shouldLoop = false
-                        null
-                    }
-                    socket?.also {
-                        btServerSocket?.close()
-                        shouldLoop = false
-                    }
-                }
-            }
-
-            fun cancel() {
-                try {
-                    btServerSocket?.close()
-                } catch (ioe: IOException) {
-                    Log.e(TAG, "Couldn't close socket connection", ioe)
-                }
+        val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter.bondedDevices
+        var bluetoothHC05: BluetoothDevice? = null
+        pairedDevices?.forEach { device ->
+            val deviceName = device.name
+            val deviceMAC = device.address
+            Log.d(TAG, "deviceName: " + deviceName.toString())
+            // simple locator for now, worry about getting the right MAC later
+            if (deviceName == "HC-05") {
+                // App crashes around here, doesn't end up running receiveSensorData()
+                Log.d(TAG, deviceName.toString() + " FUCKING LOCATED")
+                bluetoothHC05 = device
             }
         }
 
+        Log.d(TAG, "BluetoothDevice: " + bluetoothHC05?.name)
+
+    }
+
+    private fun receiveSensorData(socket: BluetoothSocket) {
+        Log.d(TAG, "ahuehue connected si madam")
+    }
+
+    @SuppressWarnings("MissingPermission")
+    private inner class ConnectThread(device: BluetoothDevice) : Thread(){
+        private val btSocket: BluetoothSocket? by lazy(LazyThreadSafetyMode.NONE) {
+            Log.d(TAG, "I made the damn thread here")
+            device.createRfcommSocketToServiceRecord(NB_UUID)
+        }
+
+        override fun run() {
+
+            btSocket?.let { socket ->
+                Log.d(TAG, "Setting up socket for connection...")
+                socket.connect()
+                Log.d(TAG, "did it connect?")
+                receiveSensorData(socket)
+            }
+        }
+
+        fun cancel() {
+            try {
+                btSocket?.close()
+            } catch (e: IOException) {
+                Log.e(TAG, "Could not close client socket", e)
+            }
+        }
     }
 
     private fun startCamera() {
@@ -258,7 +270,7 @@ class MainActivity : AppCompatActivity() {
 //          if perms are granted or not
             var permissionsGranted = true
             permissions.entries.forEach {
-                if (it.key in REQUIRED_PERMISSIONS && it.value ==  false)
+                if (it.key in REQUIRED_PERMISSIONS && it.value == false)
                     permissionsGranted = false
             }
             if (!permissionsGranted) {
