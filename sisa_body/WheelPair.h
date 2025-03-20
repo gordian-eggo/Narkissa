@@ -11,9 +11,12 @@ class WheelPair {
 	
 	public:
 		WheelMotor leftWheel(AF_DCMotor leftMotor);
-    WheelMotor rightWheel(AF_DCMotor rightMotor);
+    	WheelMotor rightWheel(AF_DCMotor rightMotor);
 		
 		WheelPair(WheelMotor left, WheelMotor right) {}
+		// do we really need to turn?
+    // kung yung focus is yung image processing, i don't think it's super important that 
+    // it moves left and right. good to have but not super important
 		void leftTurn();
 		void rightTurn();
   

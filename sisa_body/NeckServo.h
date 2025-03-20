@@ -5,21 +5,23 @@
 #include <Servo.h>
 
 class NeckServo {
-	private:
-		Servo neck;
-		const int LEFT_SPD = 105;
-		const int RIGHT_SPD = 80;
-		const int STOP_POS = 90;
-		const int RIGHT_DELAY = 1150;
-		const int PAUSED = 1000;
-		const int LEFT_DELAY = 2000;
-		const int STOPPED = 5000;
-		int position = 0;
-		int neckRotationTimeMillis = 5;
+  private:
+    Servo neck;
+    const int LEFT_SPD = 180;
+    const int RIGHT_SPD = -180;
+    const int DEFAULT_POS = 90;
+    const int RIGHT_DELAY = 2000;
+    const int LEFT_DELAY = 2000;
+    const int SCAN_DELAY = 5000;
+    const int RESET_DELAY = 2000;
+    int position = 0;
+    int neckRotationTimeMillis = 5;
 
-	public:
+  public:
     void attachNeck(int servoPin);
-		void scan();
+    void neckReset();
+    void scan();
+    void defaultMovementLoop();
 };
 
 #endif
